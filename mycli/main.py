@@ -41,6 +41,9 @@ from .encodingutils import utf8tounicode
 from .lexer import MyCliLexer
 from .__init__ import __version__
 
+import itertools
+import types
+
 click.disable_unicode_literals_warning = True
 
 try:
@@ -533,7 +536,7 @@ class MyCli(object):
                         if result_count > 0:
                             self.echo('')
                         try:
-                            self.output('\n'.join(formatted), status)
+                            self.output(formatted, status)
                         except KeyboardInterrupt:
                             pass
                         if special.is_timing_enabled():
@@ -661,8 +664,9 @@ class MyCli(object):
         self.log_output(s)
         click.secho(s, **kwargs)
 
-    def output_fits_on_screen(self, output, status=None):
-        """Check if the given output fits on the screen."""
+    def get_output_margin(self, status=None):
+        """Get the output margin (number of rows for the prompt, footer and
+        timing message."""
         size = self.cli.output.get_size()
 
         margin = self.get_reserved_space() + self.get_prompt(self.prompt_format).count('\n') + 1
@@ -671,11 +675,8 @@ class MyCli(object):
         if status:
             margin += 1 + status.count('\n')
 
-        for i, line in enumerate(output.splitlines(), 1):
-            if len(line) > size.columns or i > (size.rows - margin):
-                return False
+        return margin
 
-        return True
 
     def output(self, output, status=None):
         """Output text to stdout or a pager command.
@@ -688,15 +689,39 @@ class MyCli(object):
 
         """
         if output:
-            self.log_output(output)
-            special.write_tee(output)
-            special.write_once(output)
+            size = self.cli.output.get_size()
 
-            if (self.explicit_pager or
-                    (special.is_pager_enabled() and not self.output_fits_on_screen(output, status))):
-                click.echo_via_pager(output)
-            else:
-                click.secho(output)
+            margin = self.get_output_margin(status)
+
+            fits = True
+            buf = []
+            output_via_pager = self.explicit_pager and special.is_pager_enabled()
+            for i, line in enumerate(output, 1):
+                self.log_output(line)
+                special.write_tee(line)
+                special.write_once(line)
+
+                if fits or output_via_pager:
+                    # buffering
+                    buf.append(line)
+
+                if len(line) > size.columns or i > (size.rows - margin):
+                    # doesn't fit, flush buffer
+                    fits = False
+                    if special.is_pager_enabled:
+                        output_via_pager = True
+                    if not output_via_pager:
+                        for line in buf:
+                            click.secho(line)
+                        buf = []
+
+            if buf:
+                if output_via_pager:
+                    # sadly click.echo_via_pager doesn't accept generators
+                    click.echo_via_pager("\n".join(buf))
+                else:
+                    for line in buf:
+                        click.secho(line)
 
         if status:
             self.log_output(status)
@@ -787,7 +812,7 @@ class MyCli(object):
         output = []
 
         if title:  # Only print the title if it's not None.
-            output.append(title)
+            output = itertools.chain(output, [title])
 
         if cur:
             rows = list(cur)
@@ -799,7 +824,10 @@ class MyCli(object):
                 formatted = self.formatter.format_output(
                     rows, headers, format_name='vertical')
 
-            output.append(formatted)
+            if not isinstance(formatted, types.GeneratorType):
+                formatted = formatted.splitlines()
+            output = itertools.chain(output, formatted)
+
 
         return output
 
@@ -951,7 +979,6 @@ def cli(database, user, host, port, socket, password, dbname,
 
             if csv:
                 mycli.formatter.format_name = 'csv'
-                new_line = False
             elif not table:
                 mycli.formatter.format_name = 'tsv'
 

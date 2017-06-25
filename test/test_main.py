@@ -64,10 +64,10 @@ def test_execute_arg_with_csv(executor):
     sql = 'select * from test;'
     runner = CliRunner()
     result = runner.invoke(cli, args=CLI_ARGS + ['-e', sql] + ['--csv'])
-    expected = 'a\nabc\n\n'
+    expected = 'a\nabc\n'
 
     assert result.exit_code == 0
-    assert expected in result.output
+    assert expected in "".join(result.output)
 
 
 @dbtest
@@ -84,7 +84,7 @@ def test_batch_mode(executor):
     result = runner.invoke(cli, args=CLI_ARGS, input=sql)
 
     assert result.exit_code == 0
-    assert 'count(*)\n3\n\na\nabc\n' in result.output
+    assert 'count(*)\n3\na\nabc\n' in "".join(result.output)
 
 
 @dbtest
@@ -129,7 +129,7 @@ def test_batch_mode_csv(executor):
     expected = 'a,b\nabc,def\nghi,jkl\n'
 
     assert result.exit_code == 0
-    assert expected in result.output
+    assert expected in "".join(result.output)
 
 
 @dbtest
